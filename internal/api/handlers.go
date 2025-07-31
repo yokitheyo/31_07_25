@@ -35,7 +35,6 @@ func (h *APIHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) handleTaskSubroutes(w http.ResponseWriter, r *http.Request) {
-	// /tasks/{id}/files или /tasks/{id}/status
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/")
 	if len(parts) < 1 {
 		w.WriteHeader(http.StatusBadRequest)
@@ -85,7 +84,6 @@ func (h *APIHandler) handleGetStatus(w http.ResponseWriter, r *http.Request, tas
 }
 
 func handleArchiveDownload(w http.ResponseWriter, r *http.Request) {
-	// /archives/{task_id}.zip
 	file := r.URL.Path[len("/archives/"):]
 	if file == "" {
 		w.WriteHeader(http.StatusBadRequest)

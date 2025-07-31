@@ -3,7 +3,6 @@ package taskmgr
 import (
 	"fmt"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +19,7 @@ const maxFiles = 3
 type TaskManager struct {
 	mu    sync.Mutex
 	tasks map[string]*model.Task
-	sem   chan struct{} // semaphore for concurrent archiving
+	sem   chan struct{}
 }
 
 func NewTaskManager() *TaskManager {
@@ -47,18 +46,14 @@ func (tm *TaskManager) CreateTask() (*model.Task, error) {
 }
 
 func (tm *TaskManager) AddFile(taskID, url string) error {
-	// Валидация расширения
-	ext := strings.ToLower(filepath.Ext(url))
-	if ext != ".pdf" && ext != ".jpeg" {
-		return fmt.Errorf("file extension not allowed: %s", ext)
-	}
-	// Валидация URL
 	u, err := urlParse(url)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("invalid url: %s", url)
 	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
 	task, ok := tm.tasks[taskID]
 	if !ok {
 		return ErrTaskNotFound
@@ -66,6 +61,7 @@ func (tm *TaskManager) AddFile(taskID, url string) error {
 	if len(task.Files) >= maxFiles {
 		return ErrTooManyFiles
 	}
+
 	task.Files = append(task.Files, model.FileInfo{URL: url})
 	if len(task.Files) == maxFiles {
 		task.Status = model.StatusInProgress
@@ -75,8 +71,8 @@ func (tm *TaskManager) AddFile(taskID, url string) error {
 }
 
 func (tm *TaskManager) archiveTask(task *model.Task) {
-	tm.sem <- struct{}{}        // acquire slot
-	defer func() { <-tm.sem }() // release slot
+	tm.sem <- struct{}{}
+	defer func() { <-tm.sem }()
 	archivePath := filepath.Join("archives", task.ID+".zip")
 	urls := make([]string, len(task.Files))
 	for i, f := range task.Files {
@@ -90,7 +86,7 @@ func (tm *TaskManager) archiveTask(task *model.Task) {
 		task.ArchiveURL = ""
 		return
 	}
-	// Обновляем статусы файлов
+
 	for i, f := range task.Files {
 		found := false
 		for _, fail := range failed {

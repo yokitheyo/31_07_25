@@ -19,7 +19,7 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	cleanupArchives() // очистка при старте
+	cleanupArchives()
 	go func() {
 		for {
 			time.Sleep(time.Hour)
