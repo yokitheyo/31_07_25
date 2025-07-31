@@ -1,0 +1,24 @@
+# Go build
+/bin/
+/build/
+*.exe
+*.test
+*.out
+
+# Go modules
+/go.sum
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+/archives/
+
+# Logs
+*.log
