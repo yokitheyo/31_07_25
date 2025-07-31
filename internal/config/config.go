@@ -11,7 +11,8 @@ type Config struct {
 		Port int `yaml:"port"`
 	} `yaml:"server"`
 	Files struct {
-		AllowedExtensions []string `yaml:"allowed_extensions"`
+		AllowedExtensions   []string `yaml:"allowed_extensions"`
+		AllowedContentTypes []string `yaml:"allowed_content_types"`
 	} `yaml:"files"`
 }
 

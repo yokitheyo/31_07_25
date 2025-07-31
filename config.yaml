@@ -3,4 +3,8 @@ server:
 files:
   allowed_extensions:
     - .pdf
-    - .jpeg 
+    - .jpeg
+  allowed_content_types:
+    - application/pdf
+    - image/jpeg
+    - image/jpg

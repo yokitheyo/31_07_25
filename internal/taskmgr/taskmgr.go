@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/google/uuid"
+	"github.com/yokitheyo/31_07_25/internal/config"
 	"github.com/yokitheyo/31_07_25/internal/model"
 	"github.com/yokitheyo/31_07_25/internal/service"
 )
@@ -17,15 +18,17 @@ const maxTasks = 3
 const maxFiles = 3
 
 type TaskManager struct {
-	mu    sync.Mutex
-	tasks map[string]*model.Task
-	sem   chan struct{}
+	mu     sync.Mutex
+	tasks  map[string]*model.Task
+	sem    chan struct{}
+	config *config.Config
 }
 
-func NewTaskManager() *TaskManager {
+func NewTaskManager(cfg *config.Config) *TaskManager {
 	return &TaskManager{
-		tasks: make(map[string]*model.Task),
-		sem:   make(chan struct{}, maxTasks),
+		tasks:  make(map[string]*model.Task),
+		sem:    make(chan struct{}, maxTasks),
+		config: cfg,
 	}
 }
 
@@ -73,12 +76,18 @@ func (tm *TaskManager) AddFile(taskID, url string) error {
 func (tm *TaskManager) archiveTask(task *model.Task) {
 	tm.sem <- struct{}{}
 	defer func() { <-tm.sem }()
+
 	archivePath := filepath.Join("archives", task.ID+".zip")
 	urls := make([]string, len(task.Files))
 	for i, f := range task.Files {
 		urls[i] = f.URL
 	}
-	failed, err := service.DownloadAndArchive(urls, []string{".pdf", ".jpeg"}, archivePath)
+
+	failed, err := service.DownloadAndArchive(
+		urls,
+		tm.config.Files.AllowedContentTypes,
+		archivePath,
+	)
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	if err != nil {
