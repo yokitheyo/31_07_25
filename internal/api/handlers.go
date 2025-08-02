@@ -82,6 +82,6 @@ func (h *APIHandler) serveArchive(c *gin.Context) {
 		return
 	}
 
-	filepath := filepath.Join("archives", filename)
+	filepath := filepath.Join(h.TM.GetArchiveDir(), filename)
 	c.File(filepath)
 }

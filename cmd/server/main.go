@@ -44,7 +44,7 @@ func main() {
 
 	r.POST("/admin/cleanup", func(c *gin.Context) {
 		archived, _ := archive.CleanOldArchives(cfg.ArchiveDir, 2*time.Hour, log.Default())
-		tm.CleanupOldTasks(2 * time.Hour)
+		tm.CleanupOldTasks(1 * time.Second)
 		c.JSON(http.StatusOK, gin.H{
 			"status":              "cleanup triggered",
 			"removed_archives":    archived,

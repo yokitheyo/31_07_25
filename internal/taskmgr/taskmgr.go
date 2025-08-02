@@ -108,7 +108,7 @@ func (tm *TaskManager) archiveTask(task *model.Task) {
 		tm.mu.Unlock()
 	}()
 
-	archivePath := filepath.Join("archives", task.ID+".zip")
+	archivePath := filepath.Join(tm.config.ArchiveDir, task.ID+".zip")
 	urls := make([]string, len(task.Files))
 	for i, f := range task.Files {
 		urls[i] = f.URL
@@ -116,7 +116,7 @@ func (tm *TaskManager) archiveTask(task *model.Task) {
 
 	failed, err := service.DownloadAndArchive(
 		urls,
-		tm.config.Files.AllowedContentTypes,
+		tm.config.Files.AllowedExtensions,
 		archivePath,
 	)
 
@@ -148,7 +148,7 @@ func (tm *TaskManager) archiveTask(task *model.Task) {
 	}
 
 	task.Status = model.StatusDone
-	task.ArchiveURL = "/archives/" + task.ID + ".zip"
+	task.ArchiveURL = fmt.Sprintf("http://localhost:%d/archives/%s.zip", tm.config.Server.Port, task.ID)
 }
 
 func (tm *TaskManager) GetTask(taskID string) (*model.Task, error) {
@@ -179,6 +179,10 @@ func (tm *TaskManager) CleanupOldTasks(maxAge time.Duration) {
 			}
 		}
 	}
+}
+
+func (tm *TaskManager) GetArchiveDir() string {
+	return tm.config.ArchiveDir
 }
 
 var (
