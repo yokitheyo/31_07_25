@@ -14,6 +14,8 @@ type Config struct {
 		AllowedExtensions   []string `yaml:"allowed_extensions"`
 		AllowedContentTypes []string `yaml:"allowed_content_types"`
 	} `yaml:"files"`
+
+	ArchiveDir string `yaml:"archive_dir"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -27,5 +29,10 @@ func LoadConfig(path string) (*Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, err
 	}
+
+	if cfg.ArchiveDir == "" {
+		cfg.ArchiveDir = "archives"
+	}
+
 	return &cfg, nil
 }

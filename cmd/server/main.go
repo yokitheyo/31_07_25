@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yokitheyo/31_07_25/internal/api"
+	"github.com/yokitheyo/31_07_25/internal/archive"
 	"github.com/yokitheyo/31_07_25/internal/config"
 	"github.com/yokitheyo/31_07_25/internal/taskmgr"
 )
@@ -19,40 +20,40 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	if err := os.MkdirAll("archives", 0755); err != nil {
+	if err := os.MkdirAll(cfg.ArchiveDir, 0755); err != nil {
 		log.Fatalf("failed to create archives directory: %v", err)
 	}
 
-	cleanupArchives()
-	go func() {
-		for {
-			time.Sleep(time.Hour)
-			cleanupArchives()
-		}
-	}()
+	cleaned, err := archive.CleanOldArchives(cfg.ArchiveDir, 2*time.Hour, log.Default())
+	if err != nil {
+		log.Printf("initial archive cleanup failed: %v", err)
+	} else if cleaned > 0 {
+		log.Printf("initially cleaned %d old archives", cleaned)
+	}
 
 	tm := taskmgr.NewTaskManager(cfg)
 
 	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	if os.Getenv("GIN_MODE") != "release" {
+		r.Use(gin.Logger())
+	}
 
 	api.RegisterHandlers(r, tm)
 
-	log.Printf("Server starting on :%d...", cfg.Server.Port)
-	r.Run(fmt.Sprintf(":%d", cfg.Server.Port))
-}
+	r.POST("/admin/cleanup", func(c *gin.Context) {
+		archived, _ := archive.CleanOldArchives(cfg.ArchiveDir, 2*time.Hour, log.Default())
+		tm.CleanupOldTasks(2 * time.Hour)
+		c.JSON(http.StatusOK, gin.H{
+			"status":              "cleanup triggered",
+			"removed_archives":    archived,
+			"old_tasks_retention": "2h",
+		})
+	})
 
-func cleanupArchives() {
-	files, err := filepath.Glob("archives/*.zip")
-	if err != nil {
-		log.Printf("archive cleanup error: %v", err)
-		return
-	}
-	cutoff := time.Now().Add(-time.Hour)
-	for _, f := range files {
-		info, err := os.Stat(f)
-		if err == nil && info.ModTime().Before(cutoff) {
-			os.Remove(f)
-		}
+	log.Printf("Server starting on :%d...", cfg.Server.Port)
+	if err := r.Run(fmt.Sprintf(":%d", cfg.Server.Port)); err != nil {
+		log.Fatalf("server failed to start: %v", err)
 	}
 }

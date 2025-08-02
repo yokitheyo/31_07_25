@@ -9,3 +9,4 @@ files:
     - application/pdf
     - image/jpeg
     - image/jpg
+archive_dir: "archives"

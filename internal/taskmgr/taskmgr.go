@@ -15,20 +15,21 @@ import (
 	"github.com/yokitheyo/31_07_25/internal/service"
 )
 
-const maxTasks = 3
+const maxActiveTasks = 3
 const maxFiles = 3
 
 type TaskManager struct {
-	mu     sync.Mutex
-	tasks  map[string]*model.Task
-	sem    chan struct{}
-	config *config.Config
+	mu          sync.Mutex
+	tasks       map[string]*model.Task
+	sem         chan struct{}
+	config      *config.Config
+	activeTasks int
 }
 
 func NewTaskManager(cfg *config.Config) *TaskManager {
 	return &TaskManager{
 		tasks:  make(map[string]*model.Task),
-		sem:    make(chan struct{}, maxTasks),
+		sem:    make(chan struct{}, maxActiveTasks),
 		config: cfg,
 	}
 }
@@ -36,9 +37,11 @@ func NewTaskManager(cfg *config.Config) *TaskManager {
 func (tm *TaskManager) CreateTask() (*model.Task, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	if len(tm.tasks) >= maxTasks {
+
+	if tm.activeTasks >= maxActiveTasks {
 		return nil, ErrTooManyTasks
 	}
+
 	id := uuid.New().String()
 	task := &model.Task{
 		ID:        id,
@@ -49,44 +52,61 @@ func (tm *TaskManager) CreateTask() (*model.Task, error) {
 	return task, nil
 }
 
-func (tm *TaskManager) AddFile(taskID, url string) error {
-	// Валидация расширения
-	ext := strings.ToLower(filepath.Ext(url))
-	allowed := false
-	for _, allowedExt := range tm.config.Files.AllowedExtensions {
-		if ext == allowedExt {
-			allowed = true
-			break
+func (tm *TaskManager) AddFile(taskID, fileURL string) error {
+	u, err := url.Parse(fileURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("invalid url: %s", fileURL)
+	}
+
+	ext := strings.ToLower(filepath.Ext(u.Path))
+	if ext != "" {
+		allowed := false
+		for _, allowedExt := range tm.config.Files.AllowedExtensions {
+			if ext == allowedExt {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("file extension not allowed: %s", ext)
 		}
 	}
-	if !allowed {
-		return fmt.Errorf("file extension not allowed: %s", ext)
-	}
-	// Валидация URL
-	u, err := urlParse(url)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("invalid url: %s", url)
-	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
 	task, ok := tm.tasks[taskID]
 	if !ok {
 		return ErrTaskNotFound
 	}
+
+	if task.Status != model.StatusPending {
+		return fmt.Errorf("cannot add files to task in status: %s", task.Status)
+	}
+
 	if len(task.Files) >= maxFiles {
 		return ErrTooManyFiles
 	}
-	task.Files = append(task.Files, model.FileInfo{URL: url})
+
+	task.Files = append(task.Files, model.FileInfo{URL: fileURL})
+
 	if len(task.Files) == maxFiles {
 		task.Status = model.StatusInProgress
+		tm.activeTasks++
 		go tm.archiveTask(task)
 	}
+
 	return nil
 }
 
 func (tm *TaskManager) archiveTask(task *model.Task) {
 	tm.sem <- struct{}{}
-	defer func() { <-tm.sem }()
+	defer func() {
+		<-tm.sem
+		tm.mu.Lock()
+		tm.activeTasks--
+		tm.mu.Unlock()
+	}()
 
 	archivePath := filepath.Join("archives", task.ID+".zip")
 	urls := make([]string, len(task.Files))
@@ -99,48 +119,66 @@ func (tm *TaskManager) archiveTask(task *model.Task) {
 		tm.config.Files.AllowedContentTypes,
 		archivePath,
 	)
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
 	if err != nil {
 		task.Status = model.StatusError
-		task.ArchiveURL = ""
 		return
 	}
 
-	for i, f := range task.Files {
-		found := false
-		for _, fail := range failed {
-			if fail != "" && (f.URL == fail || failContainsURL(fail, f.URL)) {
-				task.Files[i].Success = false
-				task.Files[i].Reason = fail
-				found = true
-				break
+	failedMap := make(map[string]string)
+	for _, fail := range failed {
+		if fail != "" {
+			parts := strings.SplitN(fail, " (", 2)
+			if len(parts) >= 1 {
+				failedMap[parts[0]] = fail
 			}
 		}
-		if !found {
+	}
+
+	for i, f := range task.Files {
+		if reason, failed := failedMap[f.URL]; failed {
+			task.Files[i].Success = false
+			task.Files[i].Reason = reason
+		} else {
 			task.Files[i].Success = true
 		}
 	}
+
 	task.Status = model.StatusDone
 	task.ArchiveURL = "/archives/" + task.ID + ".zip"
-}
-
-func failContainsURL(fail, url string) bool {
-	return len(fail) > 0 && (fail == url || (len(url) > 0 && (fail == url+" (download error)" || fail == url+" (not allowed)")))
 }
 
 func (tm *TaskManager) GetTask(taskID string) (*model.Task, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
 	task, ok := tm.tasks[taskID]
 	if !ok {
 		return nil, ErrTaskNotFound
 	}
-	return task, nil
+
+	taskCopy := *task
+	taskCopy.Files = make([]model.FileInfo, len(task.Files))
+	copy(taskCopy.Files, task.Files)
+
+	return &taskCopy, nil
 }
 
-func urlParse(raw string) (*url.URL, error) {
-	return url.Parse(raw)
+func (tm *TaskManager) CleanupOldTasks(maxAge time.Duration) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	for id, task := range tm.tasks {
+		if task.Status == model.StatusDone || task.Status == model.StatusError {
+			if task.CreatedAt.Before(cutoff) {
+				delete(tm.tasks, id)
+			}
+		}
+	}
 }
 
 var (
