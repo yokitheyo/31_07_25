@@ -1,10 +1,11 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/yokitheyo/31_07_25/internal/taskmgr"
 )
 
@@ -12,84 +13,75 @@ type APIHandler struct {
 	TM *taskmgr.TaskManager
 }
 
-func RegisterHandlers(mux *http.ServeMux, tm *taskmgr.TaskManager) {
-	h := &APIHandler{TM: tm}
-	mux.HandleFunc("/tasks", h.handleCreateTask)
-	mux.HandleFunc("/tasks/", h.handleTaskSubroutes)
-	mux.HandleFunc("/archives/", handleArchiveDownload)
+type AddFileRequest struct {
+	URL string `json:"url" binding:"required"`
 }
 
-func (h *APIHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func RegisterHandlers(r *gin.Engine, tm *taskmgr.TaskManager) {
+	h := &APIHandler{TM: tm}
+
+	r.POST("/tasks", h.createTask)
+	r.POST("/tasks/:id/files", h.addFile)
+	r.GET("/tasks/:id/status", h.getStatus)
+
+	r.GET("/archives/:filename", h.serveArchive)
+}
+
+func (h *APIHandler) createTask(c *gin.Context) {
 	task, err := h.TM.CreateTask()
 	if err != nil {
-		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	c.JSON(http.StatusCreated, task)
 }
 
-func (h *APIHandler) handleTaskSubroutes(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/")
-	if len(parts) < 1 {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	taskID := parts[0]
-	if len(parts) == 2 && parts[1] == "files" {
-		h.handleAddFile(w, r, taskID)
-		return
-	}
-	if len(parts) == 2 && parts[1] == "status" {
-		h.handleGetStatus(w, r, taskID)
-		return
-	}
-	w.WriteHeader(http.StatusNotFound)
-}
+func (h *APIHandler) addFile(c *gin.Context) {
+	taskID := c.Param("id")
 
-func (h *APIHandler) handleAddFile(w http.ResponseWriter, r *http.Request, taskID string) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	var req AddFileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	var req struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
+
 	err := h.TM.AddFile(taskID, req.URL)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	c.Status(http.StatusNoContent)
 }
 
-func (h *APIHandler) handleGetStatus(w http.ResponseWriter, r *http.Request, taskID string) {
+func (h *APIHandler) getStatus(c *gin.Context) {
+	taskID := c.Param("id")
+
 	task, err := h.TM.GetTask(taskID)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
+		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+
+	c.JSON(http.StatusOK, task)
 }
 
-func handleArchiveDownload(w http.ResponseWriter, r *http.Request) {
-	file := r.URL.Path[len("/archives/"):]
-	if file == "" {
-		w.WriteHeader(http.StatusBadRequest)
+func (h *APIHandler) serveArchive(c *gin.Context) {
+	filename := c.Param("filename")
+
+	if !strings.HasSuffix(filename, ".zip") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid archive filename"})
 		return
 	}
-	path := "archives/" + file
-	w.Header().Set("Content-Type", "application/zip")
-	http.ServeFile(w, r, path)
+
+	taskID := strings.TrimSuffix(filename, ".zip")
+
+	_, err := h.TM.GetTask(taskID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "archive not found"})
+		return
+	}
+
+	filepath := filepath.Join("archives", filename)
+	c.File(filepath)
 }

@@ -3,6 +3,7 @@ package taskmgr
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,14 +50,25 @@ func (tm *TaskManager) CreateTask() (*model.Task, error) {
 }
 
 func (tm *TaskManager) AddFile(taskID, url string) error {
+	// Валидация расширения
+	ext := strings.ToLower(filepath.Ext(url))
+	allowed := false
+	for _, allowedExt := range tm.config.Files.AllowedExtensions {
+		if ext == allowedExt {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("file extension not allowed: %s", ext)
+	}
+	// Валидация URL
 	u, err := urlParse(url)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("invalid url: %s", url)
 	}
-
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-
 	task, ok := tm.tasks[taskID]
 	if !ok {
 		return ErrTaskNotFound
@@ -64,7 +76,6 @@ func (tm *TaskManager) AddFile(taskID, url string) error {
 	if len(task.Files) >= maxFiles {
 		return ErrTooManyFiles
 	}
-
 	task.Files = append(task.Files, model.FileInfo{URL: url})
 	if len(task.Files) == maxFiles {
 		task.Status = model.StatusInProgress

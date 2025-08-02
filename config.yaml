@@ -4,6 +4,7 @@ files:
   allowed_extensions:
     - .pdf
     - .jpeg
+    - .jpg
   allowed_content_types:
     - application/pdf
     - image/jpeg

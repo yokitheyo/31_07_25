@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/yokitheyo/31_07_25/internal/api"
 	"github.com/yokitheyo/31_07_25/internal/config"
 	"github.com/yokitheyo/31_07_25/internal/taskmgr"
@@ -19,6 +19,10 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
+	if err := os.MkdirAll("archives", 0755); err != nil {
+		log.Fatalf("failed to create archives directory: %v", err)
+	}
+
 	cleanupArchives()
 	go func() {
 		for {
@@ -27,19 +31,15 @@ func main() {
 		}
 	}()
 
-	tm := taskmgr.NewTaskManager()
-	mux := http.NewServeMux()
-	api.RegisterHandlers(mux, tm)
+	tm := taskmgr.NewTaskManager(cfg)
+
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.Default()
+
+	api.RegisterHandlers(r, tm)
 
 	log.Printf("Server starting on :%d...", cfg.Server.Port)
-	http.ListenAndServe(fmt.Sprintf(":%d", cfg.Server.Port), logRequest(mux))
-}
-
-func logRequest(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.URL.Path)
-		h.ServeHTTP(w, r)
-	})
+	r.Run(fmt.Sprintf(":%d", cfg.Server.Port))
 }
 
 func cleanupArchives() {
